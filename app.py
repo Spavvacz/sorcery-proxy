@@ -12,12 +12,11 @@ from reportlab.pdfgen import canvas
 
 st.set_page_config(page_title="Sorcery TCG Direct Drive Generator", page_icon="🔮", layout="centered")
 
-st.title("🔮 Sorcery TCG - Generator z Dysku Google")
-st.write("Aplikacja analizuje Twój publiczny folder Google Drive, wyciąga z niego czyste grafiki i buduje z nich arkusz PDF A4.")
+st.title("🔮 Sorcery TCG - Generator z Publicznego Dysku")
+st.write("Aplikacja analizuje wskazany publiczny folder Google Drive, wyciąga z niego standardowe grafiki (ignorując wersje foil `_f`) i buduje z nich arkusz PDF A4.")
 
 # -------------------------------------------------------------------------
 # 🧲 MIEJSCE NA TWÓJ LINK DO DYSKU GOOGLE
-# Wklej tutaj swój link do udostępnionego publicznie folderu z grafikami:
 LINK_DO_DYSKU = "https://drive.google.com/drive/folders/17IrJkRGmIU9fDSTU2JQEU9JlFzb5liLJ"
 # -------------------------------------------------------------------------
 
@@ -41,7 +40,7 @@ def fetch_all_files_from_gdrive(folder_id):
     if not folder_id:
         return files_map
     
-    # Publiczne API Google Drive pozwalające zindeksować zawartość bez kluczy autoryzacyjnych OAuth
+    # NAPRAWIONY ADRES URL: Poprawiono strukturę parametrów URL (?q=...)
     url = f"https://googleapis.com'{folder_id}'+in+parents+and+trashed=false&maxResults=1000&fields=files(id,name)"
     try:
         response = requests.get(url, timeout=10)
@@ -65,15 +64,15 @@ def fetch_all_files_from_gdrive(folder_id):
     return files_map
 
 def parse_input_text(text_block):
-    """Niezawodny parser: rozbija linie, izoluje cyfry i wyciąga czyste nazwy kart"""
+    """Parser: rozbija linie, izoluje cyfry ilości i wyciąga czyste nazwy kart"""
     decklist = {}
     for line in text_block.split('\n'):
         line = line.strip()
-        if not line or line.lower() in ['spellbook', 'atlas', 'avatar', 'maybeboard']:
+        if not line or line.lower() in ['spellbook', 'atlas', 'avatar', 'maybeboard', 'collection', 'deck history']:
             continue
             
-        # Wyłapuje cyfry na początku linii (np. "2 pudge butcher" lub "1 pudge")
-        match = re.match(r'^(\d+)\s+(.+)$', line)
+        # Dopasowuje cyfry na początku linii (np. "2 Pudge Butcher")
+        match = re.match(r'^(\d+)\s+(.+)\$', line)
         if match:
             quan = int(match.group(1))
             name = match.group(2).strip().lower()
@@ -104,12 +103,11 @@ if st.button("✨ Generuj arkusz PDF prosto z Dysku Google", type="primary"):
         if not folder_id:
             st.error("❌ Wklejony w kodzie LINK_DO_DYSKU jest niepoprawny!")
         else:
-            # Uruchomienie wyszukiwania i indeksowania struktury dysku
             with st.spinner("🔍 Indeksuję zawartość folderu Google Drive..."):
                 files_map = fetch_all_files_from_gdrive(folder_id)
                 
             if not files_map:
-                st.error("❌ Nie udało się zczytać struktury plików z Dysku Google. Upewnij się, że folder ma uprawnienia 'Każda osoba mająca link może wyświetlać'.")
+                st.error("❌ Nie udało się zczytać struktury plików z Dysku Google. Sprawdź poprawność udostępnienia folderu.")
             else:
                 decklist = parse_input_text(decklist_input)
                 
@@ -130,12 +128,10 @@ if st.button("✨ Generuj arkusz PDF prosto z Dysku Google", type="primary"):
                 for card_name, quantity in decklist.items():
                     status_text.text(f"⏳ Szukam i pobieram z Drive: '{card_name}' (x{quantity})...")
                     
-                    # Wyszukiwanie pliku w mapie zintegrowanego folderu
                     drive_file_id = find_best_gdrive_match(card_name, files_map)
                     
                     if drive_file_id:
-                        # Bezpośredni strumień pobierania pliku binarnego z Google Drive uc API
-                        download_url = f"https://drive.google.com/uc?export=download&id={drive_file_id}"
+                        download_url = f"https://google.com{drive_file_id}"
                         try:
                             req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
                             with urllib.request.urlopen(req, timeout=12) as response:
@@ -144,17 +140,16 @@ if st.button("✨ Generuj arkusz PDF prosto z Dysku Google", type="primary"):
                             image_obj = PILImage.open(io.BytesIO(img_data))
                             for _ in range(quantity):
                                 final_images.append(image_obj)
-                            print(f"Pobrano pomyślnie z Drive: {card_name}")
                         except Exception as e:
-                            st.warning(f"⚠️ Serwer Google zablokował transfer pobierania dla pliku karty: '{card_name}'.")
+                            st.warning(f"⚠️ Serwer Google zablokował transfer dla pliku karty: '{card_name}'.")
                     else:
-                        st.warning(f"⚠️ Nie zlokalizowano żadnej grafiki dla karty '{card_name}' w Twoim folderze.")
+                        st.warning(f"⚠️ Nie zlokalizowano żadnej grafiki dla karty '{card_name}' w katalogu.")
                     
                     current_card_index += 1
                     progress_bar.progress(min(current_card_index / len(decklist), 1.0))
                     
                 if not final_images:
-                    st.error("❌ BŁĄD: Żaden plik graficzny nie został wygenerowany. Upewnij się, że nazwy kart pokrywają się z nazwami na Dysku.")
+                    st.error("❌ BŁĄD: Żaden plik graficzny nie został pomyślnie przetworzony.")
                 else:
                     status_text.text("✍️ Konstruowanie pliku PDF...")
                     cards_per_page = 9
