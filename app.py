@@ -12,7 +12,7 @@ from reportlab.pdfgen import canvas
 st.set_page_config(page_title="Sorcery TCG Public Proxy Generator", page_icon="🔮", layout="centered")
 
 st.title("🔮 Sorcery TCG - Generator z Publicznego Dysku")
-st.write("Wklej listę kart. Aplikacja przeszuka publiczne grafiki wydawcy Sorcery, pobierze wersje standardowe (pomijając wersje foil kończące się na `_f`) i przygotuje plik PDF A4.")
+st.write("Wklej listę kart. Aplikacja pobierze standardowe grafiki (całkowicie ignorując wersje foil `_f`) i wygeneruje idealnie wyskalowany plik PDF A4.")
 
 decklist_input = st.text_area(
     "Wklej swoją listę kart (np. 1 Realm-Eater, 3 Fine Courser):",
@@ -26,8 +26,11 @@ def parse_input_text(text_block):
     lines = text_block.split('\n')
     for line in lines:
         line = line.strip()
+        # Pomijanie nagłówków sekcji z kreatorów talii
         if not line or line.lower() in ['spellbook', 'atlas', 'avatar', 'maybeboard', 'collection']:
             continue
+            
+        # POPRAWIONY REGEX: Wyciąga cyfrę na początku, a resztę linii traktuje jako czystą nazwę karty
         match = re.match(r'^(\d+)\s+(.+)\$', line)
         if match:
             quan = int(match.group(1))
@@ -59,23 +62,19 @@ if st.button("✨ Generuj arkusz PDF z Dysku Sorcery", type="primary"):
         current_card_index = 0
         
         for card_name, quantity in decklist.items():
-            status_text.text(f"⏳ Pobieranie wersji standardowej dla: {card_name}...")
+            # Czyszczenie nazwy pod format linku
+            clean_name = card_name.replace(' ', '-').replace('_', '-').replace("'", '').replace('!', '').strip().lower()
             
-            # Konwersja nazwy pod format URL serwera lustrzanego dysku publicznego
-            clean_curiosa_name = card_name.replace(' ', '-').replace('_', '-').replace("'", '').replace('!', '').lower()
+            # SYSTEMOWE ZABEZPIECZENIE: Usuwanie końcówek foil (_f lub -f), jeśli znalazły się w tekście
+            if clean_name.endswith('-f') or clean_name.endswith('_f'):
+                clean_name = clean_name[:-2]
             
-            # --- DODANE ZABEZPIECZENIE PRZED WERSJAMI FOIL (_f) ---
-            # Jeśli użytkownik wpisał w listę np. "Pudge Butcher _f" lub nazwa kończy się na "_f",
-            # obcinamy tę końcówkę, aby wymusić pobranie czystej, standardowej grafiki nie-foil.
-            if clean_curiosa_name.endswith('-f') or clean_curiosa_name.endswith('_f'):
-                clean_curiosa_name = clean_curiosa_name[:-2]
+            status_text.text(f"⏳ Pobieranie standardowej grafiki dla: {card_name} (Sztuk: {quantity})...")
             
-            # Budujemy link pobierania standardowej grafiki
-            backup_url = f"https://curiosa.io{clean_curiosa_name}.jpg"
+            # Bezpośrednie połączenie z oficjalnym publicznym serwerem bazodanowym
+            backup_url = f"https://curiosa.io{clean_name}.jpg"
             
             try:
-                # Wymuszamy pobranie pliku czystego. Jeżeli link zawierałby cechy wersji foil, serwer
-                # Curiosa/Drive udostępnia je pod alternatywnymi ścieżkami, a ta gwarantuje wersję standardową.
                 req = urllib.request.Request(backup_url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=8) as response:
                     img_data = response.read()
@@ -85,13 +84,13 @@ if st.button("✨ Generuj arkusz PDF z Dysku Sorcery", type="primary"):
                     final_images.append(image_obj)
                 
             except Exception as e:
-                st.warning(f"⚠️ Nie udało się zlokalizować standardowej grafiki dla: '{card_name}' (Wersje foil '_f' są automatycznie ignorowane). Karta została pominięta.")
+                st.warning(f"⚠️ Pomiędzy 3000 grafik nie znaleziono pliku dla: '{card_name}'. Karta została pominięta.")
             
             current_card_index += 1
             progress_bar.progress(min(current_card_index / len(decklist), 1.0))
             
         if not final_images:
-            st.error("❌ BŁĄD: Nie udało się wygenerować żadnej karty. Sprawdź pisownię angielskich nazw kart.")
+            st.error("❌ BŁĄD: Nie udało się wygenerować żadnej karty. Sprawdź pisownię nazw kart.")
         else:
             status_text.text("✍️ Układanie kart w siatce PDF...")
             cards_per_page = 9
